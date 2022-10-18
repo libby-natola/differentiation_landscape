@@ -1,0 +1,850 @@
+conda install -c bioconda snpsift
+
+# change the chromosome names 
+sed_opts=()
+while read -r old <&3; read -r new <&4; do
+    sed_opts+=( -e "s/\\<$old\\>/$new/g" )
+done 3< extras/old_names.txt 4< extras/new_names.txt
+sed "${sed_opts[@]}" snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf > snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed
+
+#remove all those random quotations bcftools doesn't like them
+sed -i 's/=<ID="/=<ID=/g' snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed
+sed -i 's/",length/,length/g' snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed
+
+# split species
+vcftools --vcf snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed \
+--keep extras/RBSA_indivs.txt \
+--recode \
+--out snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa
+
+# split species
+vcftools --vcf snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed \
+--keep extras/RNSA_indivs.txt \
+--recode \
+--out snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa
+
+# split species
+vcftools --vcf snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed \
+--keep extras/YBSA_indivs.txt \
+--recode \
+--out snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa
+
+vcftools --vcf snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed \
+--keep extras/RBSA_indivs.txt \
+--keep extras/RNSA_indivs.txt \
+--keep extras/rnrb.txt \
+--recode \
+--out snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa
+
+vcftools --vcf snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed \
+--keep extras/RBSA_indivs.txt \
+--keep extras/YBSA_indivs.txt \
+--keep extras/rbyb.txt \
+--recode \
+--out snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa
+
+vcftools --vcf snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed \
+--keep extras/YBSA_indivs.txt \
+--keep extras/RNSA_indivs.txt \
+--keep extras/ybrn.txt \
+--recode \
+--out snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa
+
+mkdir chrs
+#### okay I'm going to do this all one spp at a time, then delete because the ld files are gargantuan
+
+
+#split chromosomes
+SnpSift split snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode.vcf
+SnpSift split snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode.vcf
+SnpSift split snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode.vcf
+SnpSift split snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode.vcf
+SnpSift split snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode.vcf
+SnpSift split snps/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode.vcf
+
+#move the Pseudo chrom files to the chrs directory
+mv snps/*Pseudo* chrs
+mkdir chrs/heatmaps/
+
+
+cat > scripts/chrom_LD.pbs
+----------
+#!/bin/bash
+#PBS -l walltime=96:00:00,select=1:ncpus=8:mem=96gb
+#PBS -N chrom_LD.pbs
+#PBS -A st-darreni-1
+#PBS -m abe 
+#PBS -M natola@zoology.ubc.ca
+#PBS -o outputs/chrom_LD.output.txt
+#PBS -e errors/chrom_LD.error.txt
+
+# load conda environment
+conda init bash
+source ~/.bashrc
+conda activate wgs
+
+cd $PBS_O_WORKDIR
+while read chrom
+do 
+
+#convert to bed and calculate LD for each group
+#rbsa
+plink --allow-extra-chr --double-id --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf
+
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf --r2 
+
+# make heatmaps
+Rscript scripts/ld.heatmap.chr.R rbsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.*
+
+
+#rnsa
+plink --allow-extra-chr --double-id --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf
+
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf --r2 
+
+# make heatmaps
+Rscript scripts/ld.heatmap.chr.R rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.*
+
+
+#ybsa
+plink --allow-extra-chr --double-id --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf
+
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf --r2 
+
+# make heatmaps
+Rscript scripts/ld.heatmap.chr.R ybsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.*
+
+
+#rbsa_rnsa
+plink --allow-extra-chr --double-id --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf
+
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf --r2 
+
+# make heatmaps
+Rscript scripts/ld.heatmap.chr.R rbsa_rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.*
+
+
+#rbsa_ybsa
+plink --allow-extra-chr --double-id --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf
+
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf --r2 
+
+# make heatmaps
+Rscript scripts/ld.heatmap.chr.R rbsa_ybsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.*
+
+
+#ybsa_rnsa
+plink --allow-extra-chr --double-id --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf
+
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf --r2 
+
+# make heatmaps
+Rscript scripts/ld.heatmap.chr.R ybsa_rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.*
+
+done < extras/new_names_100.txt
+----------
+qsub scripts/chrom_LD.pbs
+
+
+
+
+cat > scripts/ld.heatmap.chr.R
+----------
+## clear workspace
+unlink(".RData")
+
+#set huge memory
+library(unix)
+rlimit_as(Inf)
+
+## set working directory
+setwd("/scratch/st-darreni-1/libby/WGS/")
+library(ggplot2)
+
+## have it take args from command line execution
+args <- commandArgs(trailingOnly = TRUE)
+
+chr <- read.table(paste("chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_", args[1], ".recode.", args[2], ".vcf.ld", sep = ""), header = TRUE)
+png(paste("chrs/heatmaps/", args[1], "_", args[2], ".LD.png", sep = ""))
+ggplot(chr, aes(BP_A,BP_B, color=R2))+geom_point()+
+  scale_color_gradient(low="white", high="red") + labs(title=paste("LD ", args[1], args[2]))
+dev.off()
+----------
+
+###  lots of those don't work the files are too big make another loop for the larger chroms
+
+# actually just randomly thin until we have 50000 snps those all seemed to work. split it into 3 jobs to run concurrently
+
+cat > extras/new_names_thin_10.txt
+Pseudo1
+Pseudo2
+Pseudo1003
+Pseudo4
+Pseudo5
+Pseudo6
+Pseudo7
+Pseudo8
+Pseudo9
+
+cat > extras/new_names_thin_20.txt
+Pseudo10
+Pseudo11
+Pseudo12
+Pseudo13
+Pseudo14
+Pseudo15
+Pseudo16
+Pseudo17
+Pseudo18
+Pseudo19
+
+
+cat > extras/new_names_thin_30.txt
+Pseudo20
+Pseudo21
+Pseudo22
+Pseudo23
+Pseudo24
+Pseudo25
+Pseudo26
+Pseudo27
+Pseudo28
+Pseudo29
+
+
+cat > extras/new_names_thin_40.txt
+Pseudo1030
+Pseudo31
+Pseudo32
+Pseudo33
+Pseudo34
+Pseudo35
+Pseudo36
+Pseudo37
+Pseudo38
+Pseudo39
+
+
+cat > extras/new_names_thin_50.txt
+Pseudo40
+Pseudo41
+Pseudo42
+Pseudo43
+Pseudo1044
+Pseudo45
+Pseudo46
+Pseudo1048
+Pseudo49
+Pseudo2050
+Pseudo52
+
+cat > scripts/ld.heatmap.thin.chr.R
+----------
+## clear workspace
+unlink(".RData")
+
+#set huge memory
+library(unix)
+rlimit_as(Inf)
+
+## set working directory
+setwd("/scratch/st-darreni-1/libby/WGS/")
+library(ggplot2)
+
+## have it take args from command line execution
+args <- commandArgs(trailingOnly = TRUE)
+
+chr <- read.table(paste("chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_", args[1], ".recode.", args[2], ".vcf.thinned.ld", sep = ""), header = TRUE)
+png(paste("chrs/heatmaps/", args[1], ".", args[2], ".thinned.LD.png", sep = ""))
+ggplot(chr, aes(BP_A,BP_B, color=R2))+geom_point()+
+  scale_color_gradient(low="white", high="red") + labs(title=paste("LD ", args[1], args[2]))
+dev.off()
+----------
+
+cat > scripts/chrom_thin_10_LD.pbs
+----------
+#!/bin/bash
+#PBS -l walltime=96:00:00,select=1:ncpus=8:mem=96gb
+#PBS -N chrom_thin_10_LD.pbs
+#PBS -A st-darreni-1
+#PBS -m abe 
+#PBS -M natola@zoology.ubc.ca
+#PBS -o outputs/chrom_thin_10_LD.output.txt
+#PBS -e errors/chrom_thin_10_LD.error.txt
+
+# load conda environment
+conda init bash
+source ~/.bashrc
+conda activate wgs
+
+cd $PBS_O_WORKDIR
+while read chrom
+do 
+
+#convert to bed and calculate LD for each group
+
+#rbsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.*
+
+
+#rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.*
+
+#ybsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R ybsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.*
+
+
+#rbsa_rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa_rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.*
+
+#rbsa_ybsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa_ybsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.*
+
+#ybsa_rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R ybsa_rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.*
+
+done < extras/new_names_thin_10.txt
+----------
+qsub scripts/chrom_thin_10_LD.pbs
+
+
+cat > scripts/chrom_thin_20_LD.pbs
+----------
+#!/bin/bash
+#PBS -l walltime=96:00:00,select=1:ncpus=8:mem=96gb
+#PBS -N chrom_thin_20_LD.pbs
+#PBS -A st-darreni-1
+#PBS -m abe 
+#PBS -M natola@zoology.ubc.ca
+#PBS -o outputs/chrom_thin_20_LD.output.txt
+#PBS -e errors/chrom_thin_20_LD.error.txt
+
+# load conda environment
+conda init bash
+source ~/.bashrc
+conda activate wgs
+
+cd $PBS_O_WORKDIR
+while read chrom
+do 
+
+#convert to bed and calculate LD for each group
+
+#rbsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.*
+
+
+#rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.*
+
+#ybsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R ybsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.*
+
+
+#rbsa_rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa_rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.*
+
+#rbsa_ybsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa_ybsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.*
+
+#ybsa_rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R ybsa_rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.*
+
+done < extras/new_names_thin_20.txt
+----------
+qsub scripts/chrom_thin_20_LD.pbs
+
+
+cat > scripts/chrom_thin_30_LD.pbs
+----------
+#!/bin/bash
+#PBS -l walltime=96:00:00,select=1:ncpus=8:mem=96gb
+#PBS -N chrom_thin_30_LD.pbs
+#PBS -A st-darreni-1
+#PBS -m abe 
+#PBS -M natola@zoology.ubc.ca
+#PBS -o outputs/chrom_thin_30_LD.output.txt
+#PBS -e errors/chrom_thin_30_LD.error.txt
+
+# load conda environment
+conda init bash
+source ~/.bashrc
+conda activate wgs
+
+cd $PBS_O_WORKDIR
+while read chrom
+do 
+
+#convert to bed and calculate LD for each group
+
+#rbsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.*
+
+
+#rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.*
+
+#ybsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R ybsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.*
+
+
+#rbsa_rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa_rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.*
+
+#rbsa_ybsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa_ybsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.*
+
+#ybsa_rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R ybsa_rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.*
+
+done < extras/new_names_thin_30.txt
+----------
+qsub scripts/chrom_thin_30_LD.pbs
+
+cat > scripts/chrom_thin_40_LD.pbs
+----------
+#!/bin/bash
+#PBS -l walltime=96:00:00,select=1:ncpus=8:mem=96gb
+#PBS -N chrom_thin_40_LD.pbs
+#PBS -A st-darreni-1
+#PBS -m abe 
+#PBS -M natola@zoology.ubc.ca
+#PBS -o outputs/chrom_thin_40_LD.output.txt
+#PBS -e errors/chrom_thin_40_LD.error.txt
+
+# load conda environment
+conda init bash
+source ~/.bashrc
+conda activate wgs
+
+cd $PBS_O_WORKDIR
+while read chrom
+do 
+
+#convert to bed and calculate LD for each group
+
+#rbsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.*
+
+
+#rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.*
+
+#ybsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R ybsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.*
+
+
+#rbsa_rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa_rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.*
+
+#rbsa_ybsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa_ybsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.*
+
+#ybsa_rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R ybsa_rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.*
+
+done < extras/new_names_thin_40.txt
+----------
+qsub scripts/chrom_thin_40_LD.pbs
+
+cat > scripts/chrom_thin_50_LD.pbs
+----------
+#!/bin/bash
+#PBS -l walltime=96:00:00,select=1:ncpus=8:mem=96gb
+#PBS -N chrom_thin_50_LD.pbs
+#PBS -A st-darreni-1
+#PBS -m abe 
+#PBS -M natola@zoology.ubc.ca
+#PBS -o outputs/chrom_thin_50_LD.output.txt
+#PBS -e errors/chrom_thin_50_LD.error.txt
+
+# load conda environment
+conda init bash
+source ~/.bashrc
+conda activate wgs
+
+cd $PBS_O_WORKDIR
+while read chrom
+do 
+
+#convert to bed and calculate LD for each group
+
+#rbsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.*
+
+
+#rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rnsa.recode."$chrom".vcf.*
+
+#ybsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R ybsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa.recode."$chrom".vcf.*
+
+
+#rbsa_rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa_rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_rnsa.recode."$chrom".vcf.*
+
+#rbsa_ybsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R rbsa_ybsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa_ybsa.recode."$chrom".vcf.*
+
+#ybsa_rnsa
+
+#thin and convert to bed
+plink --allow-extra-chr --vcf chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf --thin-count 50000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned
+
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.thinned --r2
+
+# make heatmaps
+Rscript scripts/ld.heatmap.thin.chr.R ybsa_rnsa "$chrom"
+
+#clear space
+rm chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_ybsa_rnsa.recode."$chrom".vcf.*
+
+done < extras/new_names_thin_50.txt
+----------
+qsub scripts/chrom_thin_50_LD.pbs
+
+
+#thin and convert to bed
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf --thin-count 30000 --make-bed --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned
+# calculate ld
+plink --allow-extra-chr --bfile chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned --inter-chr --out chrs/wgs_SNPs_filtered_missing80_mindepth3_nowisa.recode.vcf.renamed_rbsa.recode."$chrom".vcf.thinned --r2
+
+
