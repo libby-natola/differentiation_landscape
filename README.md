@@ -14,7 +14,7 @@ ORCID: 0000-0001-7576-2825
 Email: libby.natola@gmail.com
 
 3. Description of dataset
-This readme details files and analyses used in "Genomic divergence and speciation in red-naped, red-breasted, and yellow-bellied sapsuckers " for Molecular Ecology, CITATION HERE
+This readme details files and analyses used in "Genomic divergence and speciation in red-naped, red-breasted, and yellow-bellied sapsuckers "  CITATION HERE
 
 4. Date and geographic location of Data Collection:
 Data were collected by Libby Natola from 2019-2022 at the University of British Columbia
